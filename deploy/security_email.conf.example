@@ -1,0 +1,9 @@
+# SMTP settings for emailing security reports (deploy/security.py --email).
+# Installed as /etc/zunzunsite3/security_email.conf, which must be owned by root with
+# mode 600 because it holds a password. Never put the real password in this example file.
+[smtp]
+host = smtp.gmail.com
+port = 587            ; 465 for SSL, anything else uses STARTTLS
+user = findcurves@gmail.com
+password = xxxxxxxxxxxxxxxx   ; for Gmail: a 16-letter app password, not the account password
+from = findcurves@gmail.com

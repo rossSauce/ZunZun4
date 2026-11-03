@@ -1,0 +1,28 @@
+#!/bin/sh
+# Refuse commits that add passwords, keys or database files.
+# Enable once per clone:  git config core.hooksPath deploy/git-hooks
+# Override for a false alarm:  git commit --no-verify
+
+status=0
+
+# 1. files that should never be committed
+bad_files=$(git diff --cached --name-only --diff-filter=ACR | grep -E \
+  '(^|/)(secret_key|email_password|security_email\.conf|\.env(\..*)?|id_rsa.*|id_ed25519.*)$|\.(sqlite3|db|pem|key)$')
+if [ -n "$bad_files" ]; then
+  echo "pre-commit: refusing to commit secret or database files:" >&2
+  echo "$bad_files" | sed 's/^/    /' >&2
+  status=1
+fi
+
+# 2. hardcoded secrets in added lines. Values read from os.environ or files,
+#    empty strings and xxxx placeholders are allowed.
+hits=$(git diff --cached -U0 --diff-filter=ACM -- . ':(exclude)deploy/git-hooks/*' | grep -E '^\+[^+]' | grep -iE \
+  "(PASSWORD|PASSWD|SECRET_KEY|API_KEY|TOKEN)[A-Z_]*[[:space:]]*[=:][[:space:]]*['\"][^'\"]{4,}['\"]|^\+[[:space:]]*password[[:space:]]*=[[:space:]]*[^x[:space:];][^[:space:];]{5,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}")
+if [ -n "$hits" ]; then
+  echo "pre-commit: these added lines look like passwords or keys:" >&2
+  echo "$hits" | cut -c1-120 | sed 's/^/    /' >&2
+  echo "Read them from /etc/zunzunsite3/ or an environment variable instead." >&2
+  status=1
+fi
+
+exit $status

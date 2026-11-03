@@ -1,0 +1,38 @@
+# runtime data: never commit (session data includes visitors' pickled sessions)
+session_db/db.sqlite3
+session_db/db.sqlite3-*
+session_db/clear_sessions.lock
+
+# generated graphs, result pages, PDFs, logs and trace files; static_images is tracked
+temp/*
+!temp/static_images/
+
+__pycache__/
+*.pyc
+.vscode/
+
+# secrets: keep real keys and passwords out of the repository
+# (the live ones are in /etc/zunzunsite3/, outside the repo)
+secret_key
+email_password
+security_email.conf
+*.conf.local
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+local_settings.py
+settings_local.py
+
+# any database or session store
+*.sqlite3
+*.sqlite3-*
+*.db
+
+# editor and OS clutter
+.idea/
+*.swp
+*~
+.DS_Store

@@ -1,0 +1,11 @@
+# /etc/nginx/sites-available/default  (installed by deploy/install.sh)
+#
+# Requests that do not match a configured server_name, such as requests by bare IP address,
+# are dropped. This server previously served all of /var/www/html as plain files, which made
+# settings files, the session database, logs and .git directories downloadable.
+server {
+	listen 80 default_server;
+	listen [::]:80 default_server;
+	server_name _;
+	return 444; # close the connection without sending a response
+}

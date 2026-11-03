@@ -1,0 +1,37 @@
+# Production server for zunzunsite3: gunicorn on 127.0.0.1:8000, behind nginx.
+# Installed by deploy/install.sh to /etc/systemd/system/zunzunsite3.service
+#
+#   sudo systemctl status zunzunsite3      # is it running?
+#   sudo systemctl restart zunzunsite3     # pick up code changes (gunicorn does not auto-reload)
+#   sudo journalctl -u zunzunsite3 -f      # follow the server output
+
+[Unit]
+Description=ZunZunSite3 curve fitting site (gunicorn)
+After=network.target
+
+[Service]
+# Runs as the account that owns the project files and has pyeq3 installed in ~/.local.
+# Group www-data matches the group ownership of temp/ and session_db/.
+User=rossmoffett
+Group=www-data
+SupplementaryGroups=rossmoffett
+# group-writable files, as the existing temp/ and session_db/ files are
+UMask=0002
+WorkingDirectory=/var/www/html/zunzunsite3
+Environment=PYTHONUNBUFFERED=1
+
+# Sync workers: the site calls os.fork() for long-running fits and housekeeping, which
+# gunicorn's sync workers allow (uwsgi does not, see README.txt). Each worker loads
+# numpy/scipy/matplotlib/pyeq3, so keep the count low on this small server.
+ExecStart=/usr/bin/gunicorn --workers 3 --timeout 120 --bind 127.0.0.1:8000 \
+    --access-logfile - --error-logfile - wsgi:application
+
+Restart=on-failure
+RestartSec=5
+
+# Long-running fits are forked from a worker and keep running after the request returns.
+# Only signal the gunicorn master on stop/restart so a restart does not kill fits in progress.
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
