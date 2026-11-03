@@ -2,7 +2,8 @@ Welcome to zunzunsite3, a Django site in Python 3 for curve fitting 2D
 and 3D data that can output source code in several computing languages
 and run a genetic algorithm for initial parameter estimation. Includes
 orthogonal distance and relative error regressions. Generates PDF files
-and surface animations. Based on code from zunzun.com. 
+and surface animations. Based on code from zunzun.com, written by
+James R. Phillips. Now maintained by Ross Moffett: findcurves@gmail.com
 
 You will need to install scipy, matplotlib, django, bs4, imagemagick
 gifsicle and reportlab to run this software, alog with psutil.  On

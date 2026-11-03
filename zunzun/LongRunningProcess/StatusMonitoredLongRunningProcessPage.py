@@ -107,6 +107,7 @@ class NumberedCanvas(canvas.Canvas):
         self.setFont("Helvetica", 7)
         self.drawRightString(200*mm, 20*mm, "Page %d of %d" % (self._pageNumber, page_count))
         self.drawCentredString(25*mm, 20*mm, 'https://bitbucket.org/zunzuncode/zunzunsite3')
+        self.drawCentredString(105*mm, 20*mm, 'Questions: Ross Moffett, findcurves@gmail.com')
 
 
 
