@@ -1,4 +1,4 @@
-import string, numpy, scipy.stats
+import logging, string, numpy, scipy.stats
 
 from . import pid_trace
 
@@ -109,43 +109,17 @@ class DataObject:
         self.statistics[preString + "_min"] = min(tempdata)
         self.statistics[preString + "_max"] = max(tempdata)
 
-        # these we can live without
-        try:
-            temp = scipy.mean(tempdata)
-            self.statistics[preString + "_mean"] = temp
-        except:
-            pass
-        try:
-            temp = scipy.stats.sem(tempdata)
-            self.statistics[preString + "_sem"] = temp
-        except:
-            pass
-        try:
-            temp = scipy.median(tempdata)
-            self.statistics[preString + "_median"] = temp
-        except:
-            pass
-        try:
-            temp = scipy.var(tempdata)
-            self.statistics[preString + "_var"] = temp
-        except:
-            pass
-        try:
-            temp = scipy.std(tempdata)
-            self.statistics[preString + "_std"] = temp
-        except:
-            pass
-        try:
-            temp = scipy.stats.skew(tempdata)
-            self.statistics[preString + "_skew"] = temp
-        except:
-            pass
-        try:
-            temp = scipy.stats.kurtosis(tempdata)
-            self.statistics[preString + "_kurtosis"] = temp
-        except:
-            pass
-            
+        # these we can live without, but log any failure rather than hiding it: the old
+        # scipy.mean/median/var/std aliases vanished from scipy and a bare "except: pass"
+        # turned that into "n/a" on every report without anyone noticing
+        for name, function in (('mean', numpy.mean), ('sem', scipy.stats.sem), ('median', numpy.median),
+                               ('var', numpy.var), ('std', numpy.std), ('skew', scipy.stats.skew),
+                               ('kurtosis', scipy.stats.kurtosis)):
+            try:
+                self.statistics[preString + "_" + name] = function(tempdata)
+            except Exception:
+                logging.getLogger(__name__).warning('could not calculate %s statistic %s', preString, name, exc_info=True)
+
         pid_trace.pid_trace()
 
 

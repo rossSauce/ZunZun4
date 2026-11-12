@@ -23,6 +23,7 @@ from . import ClassForAttachingProperties
 from . import ReportsAndGraphs
 
 import zunzun.forms
+import zunzun.udf_safety
 from . import DefaultData
 
 import pyeq3
@@ -51,7 +52,7 @@ def ParallelWorker_CreateReportOutput(inReportObject):
     try:
         if inReportObject.dataObject.equation.GetDisplayName() == 'User Defined Function': # User Defined Function will not pickle, see http://support.picloud.com/entries/122330-an-error-i-don-t-understand
             inReportObject.dataObject.equation.userDefinedFunctionText = inReportObject.dataObject.userDefinedFunctionText
-            inReportObject.dataObject.equation.ParseAndCompileUserFunctionString(inReportObject.dataObject.equation.userDefinedFunctionText)
+            zunzun.udf_safety.parse_and_compile_udf(inReportObject.dataObject.equation, inReportObject.dataObject.equation.userDefinedFunctionText)
             
         inReportObject.CreateReportOutput()
 
@@ -84,6 +85,66 @@ def ParallelWorker_CreateCharacterizerOutput(inReportObject):
         return [inReportObject.name, [], 'Exception characterizer output, see log file']
 
 
+TIMED_OUT = object() # placeholder result for a work item that took too long
+
+
+def RunInPoolWithTimeouts(lrp, function, argsList, descriptions, onWaiting):
+    # Run function(*args) for every entry of argsList in a process pool and return the
+    # results in order. A single item that runs longer than PARALLEL_ITEM_TIMEOUT_SECONDS gets
+    # TIMED_OUT: the pool is terminated (its worker may be stuck in scipy for an hour) and the
+    # items not yet finished are resubmitted to a fresh pool, so one pathological case cannot
+    # hold up the rest. onWaiting() is called about once a second while waiting, so the status
+    # page stays current and an abandoned fit is noticed (it calls CheckIfStillUsed).
+    import logging
+    results = [None] * len(argsList)
+    pending = list(range(len(argsList)))
+    while pending:
+        pool = multiprocessing.Pool(lrp.GetParallelProcessCount())
+        lrp.pool = pool
+        asyncResults = {i: pool.apply_async(function, argsList[i]) for i in pending}
+        stuck = None
+        for i in pending:
+            # pool tasks start in submission order, so when the items before this one are
+            # done, this one is running; time it from now
+            deadline = time.time() + settings.PARALLEL_ITEM_TIMEOUT_SECONDS
+            while True:
+                try:
+                    results[i] = asyncResults[i].get(timeout=1.0)
+                    break
+                except multiprocessing.TimeoutError:
+                    if time.time() >= deadline:
+                        stuck = i
+                        break
+                    onWaiting()
+            if stuck is not None:
+                break
+        if stuck is None:
+            ClosePool(pool, False)
+            pending = []
+        else:
+            logging.getLogger(__name__).warning('parallel work item %s timed out after %s seconds', descriptions[stuck], settings.PARALLEL_ITEM_TIMEOUT_SECONDS)
+            results[stuck] = TIMED_OUT
+            remaining = []
+            for j in pending[pending.index(stuck) + 1:]:
+                if asyncResults[j].ready():
+                    results[j] = asyncResults[j].get()
+                else:
+                    remaining.append(j)
+            ClosePool(pool, True)
+            pending = remaining
+        lrp.pool = None
+    return results
+
+
+def ClosePool(pool, terminate):
+    # terminate if a worker may be stuck (join would wait for it forever)
+    if terminate:
+        pool.terminate()
+    else:
+        pool.close()
+    pool.join()
+
+
 # from http://code.activestate.com/recipes/576832-improved-reportlab-recipe-for-page-x-of-y/
 class NumberedCanvas(canvas.Canvas):
     def __init__(self, *args, **kwargs):
@@ -106,7 +167,7 @@ class NumberedCanvas(canvas.Canvas):
     def draw_page_number(self, page_count):
         self.setFont("Helvetica", 7)
         self.drawRightString(200*mm, 20*mm, "Page %d of %d" % (self._pageNumber, page_count))
-        self.drawCentredString(25*mm, 20*mm, 'https://bitbucket.org/zunzuncode/zunzunsite3')
+        self.drawCentredString(25*mm, 20*mm, 'https://github.com/rossSauce/ZunZun4')
         self.drawCentredString(105*mm, 20*mm, 'Questions: Ross Moffett, findcurves@gmail.com')
 
 
@@ -484,10 +545,10 @@ You must provide any weights you wish to use.
     def SaveDictionaryOfItemsToSessionStore(self, inSessionStoreName, inDictionary):
         pid_trace.pid_trace(inSessionStoreName)
         
-        session = eval('self.session_' + inSessionStoreName)
+        session = getattr(self, 'session_' + inSessionStoreName)
         if session is None:
             pid_trace.pid_trace('No session in sessionstore, creating new session')
-            session = eval('SessionStore(self.session_key_' + inSessionStoreName + ')')
+            session = SessionStore(getattr(self, 'session_key_' + inSessionStoreName))
             
         pid_trace.pid_trace()
         
@@ -537,9 +598,9 @@ You must provide any weights you wish to use.
     def LoadItemFromSessionStore(self, inSessionStoreName, inItemName):
         pid_trace.pid_trace()
         
-        session = eval('self.session_' + inSessionStoreName)
+        session = getattr(self, 'session_' + inSessionStoreName)
         if session is None:
-            session = eval('SessionStore(self.session_key_' + inSessionStoreName + ')')
+            session = SessionStore(getattr(self, 'session_key_' + inSessionStoreName))
         try:
             returnItem = session[inItemName]
         except:
@@ -614,36 +675,34 @@ You must provide any weights you wish to use.
         pid_trace.pid_trace()
 
         for i in indices:
-            parallelChunkResultsList = []
-
-            self.pool = multiprocessing.Pool(self.GetParallelProcessCount())
             for item in reportsToBeRunInParallel[i[0]:i[1]]:
                 try:
                     item.dataObject.equation.modelRelativeError
                 except:
                     item.dataObject.equation.modelRelativeError = None
-                if self.characterizerOutputTrueOrReportOutputFalse:
-                    parallelChunkResultsList.append(self.pool.apply_async(ParallelWorker_CreateCharacterizerOutput, (item,)))
-                else:
+                if not self.characterizerOutputTrueOrReportOutputFalse:
                     if item.dataObject.equation.GetDisplayName() == 'User Defined Function': # User Defined Function will not pickle, see http://support.picloud.com/entries/122330-an-error-i-don-t-understand, regenerate in the parallel pool
                         item.dataObject.userDefinedFunctionText = item.dataObject.equation.userDefinedFunctionText
                         item.dataObject.equation.userFunctionCodeObject = None
                         item.dataObject.equation.safe_dict = None
-                    parallelChunkResultsList.append(self.pool.apply_async(ParallelWorker_CreateReportOutput, (item,)))
+            if self.characterizerOutputTrueOrReportOutputFalse:
+                workerFunction = ParallelWorker_CreateCharacterizerOutput
+            else:
+                workerFunction = ParallelWorker_CreateReportOutput
 
-            for r in parallelChunkResultsList:
-                returnedValue = r.get()
-                for report in reportsToBeRunInParallel[i[0]:i[1]]:
+            chunk = reportsToBeRunInParallel[i[0]:i[1]]
+            def onWaiting():
+                self.Reports_CheckOneSecondSessionUpdates(countOfReportsRun, totalNumberOfReportsToBeRun)
+            for item, returnedValue in zip(chunk, RunInPoolWithTimeouts(self, workerFunction, [(item,) for item in chunk], [item.name for item in chunk], onWaiting)):
+                if returnedValue is TIMED_OUT:
+                    returnedValue = [item.name, [], 'timed out']
+                for report in chunk:
                     if report.name == returnedValue[0]:
                         if returnedValue[2]: # exception during parallel processing
                             report.exception = True
                         report.stringList = returnedValue[1]
                 countOfReportsRun += 1
                 self.Reports_CheckOneSecondSessionUpdates(countOfReportsRun, totalNumberOfReportsToBeRun)
-
-            self.pool.close()
-            self.pool.join()
-            self.pool = None
             
         pid_trace.delete_pid_trace_file()
 
@@ -658,6 +717,23 @@ You must provide any weights you wish to use.
             self.oneSecondTimes = int(time.time())
 
 
+    def AbandonThisFit(self):
+        # Stop now: terminate (not close and join, which waits for a hung worker) the pool and
+        # any other child processes, then exit. Children inherit default SIGTERM handling from
+        # this process (see zunzun/process_control.py), so terminate() really ends them.
+        if self.pool:
+            ClosePool(self.pool, True)
+            self.pool = None
+        for p in multiprocessing.active_children():
+            p.terminate()
+        for p in multiprocessing.active_children():
+            p.join(5.0)
+            if p.is_alive():
+                p.kill()
+        pid_trace.delete_pid_trace_file()
+        os._exit(0)
+
+
     def CheckIfStillUsed(self):
         import time
         if self.LoadItemFromSessionStore('status', 'processID') == None:
@@ -666,37 +742,12 @@ You must provide any weights you wish to use.
         # if a new process ID is in the session data, another process was started and this process was abandoned
         if self.LoadItemFromSessionStore('status', 'processID') != os.getpid() and self.LoadItemFromSessionStore('status', 'processID') != 0:
             
-            time.sleep(1.0)
-
-            pid_trace.pid_trace()
-
-            if self.pool:
-                self.pool.close()
-                self.pool.join()
-                self.pool = None
-            for p in multiprocessing.active_children():
-                p.terminate()
-                
-            pid_trace.delete_pid_trace_file()
-
-            os._exit(0) # kills pool processes
+            self.AbandonThisFit()
 
         # if the status has not been checked in the past 30 seconds, this process was abandoned
         if (time.time() - self.LoadItemFromSessionStore('status', 'time_of_last_status_check')) > 300:
 
-            pid_trace.pid_trace()
-
-            time.sleep(1.0)
-            if self.pool:
-                self.pool.close()
-                self.pool.join()
-                self.pool = None
-            for p in multiprocessing.active_children():
-                p.terminate()
-                
-            pid_trace.delete_pid_trace_file()
-                
-            os._exit(0) # kills pool processes
+            self.AbandonThisFit()
 
 
     def SetInitialStatusDataIntoSessionVariables(self, request):
@@ -705,7 +756,9 @@ You must provide any weights you wish to use.
                                                  {'currentStatus':'Initializing',
                                                   'start_time':time.time(),
                                                   'time_of_last_status_check':time.time(),
-                                                  'redirectToResultsFileOrURL':''})
+                                                  'redirectToResultsFileOrURL':'',
+                                                  'processID':0, # set by the fit process when it starts
+                                                  'finished':False})
 
         self.SaveDictionaryOfItemsToSessionStore('data',
                                                  {'textDataEditor_' + str(self.dimensionality) + 'D':request.POST['textDataEditor'],
@@ -764,7 +817,7 @@ You must provide any weights you wish to use.
         # generate required text reports
         self.SaveDictionaryOfItemsToSessionStore('status', {'currentStatus':"Generating List Of Text Reports"})
         for i in self.ReportsAndGraphsCategoryDict["Text Reports"]:
-            exec('i.' + self.functionString + '()')
+            getattr(i, self.functionString)()
             if i.name != '':
                 self.textReports.append(i)
 
@@ -773,7 +826,7 @@ You must provide any weights you wish to use.
         # select required graph reports
         self.SaveDictionaryOfItemsToSessionStore('status', {'currentStatus':"Generating List Of Graphical Reports"})
         for i in self.ReportsAndGraphsCategoryDict["Graph Reports"]:
-            exec('i.' + self.functionString + '()')
+            getattr(i, self.functionString)()
             if i.name != '':
                 self.graphReports.append(i)
 
@@ -826,7 +879,7 @@ You must provide any weights you wish to use.
 
         itemsToRender['equationInstance'] = self.equationInstance
         if self.evaluateAtAPointFormNeeded:
-            itemsToRender['EvaluateAtAPointForm'] = eval('zunzun.forms.EvaluateAtAPointForm_' + str(self.dimensionality) + 'D()')
+            itemsToRender['EvaluateAtAPointForm'] = getattr(zunzun.forms, 'EvaluateAtAPointForm_' + str(self.dimensionality) + 'D')()
             itemsToRender['IndependentDataName1'] = self.dataObject.IndependentDataName1
             itemsToRender['IndependentDataName2'] = self.dataObject.IndependentDataName2
         itemsToRender['loadavg'] = os.getloadavg()
@@ -857,14 +910,14 @@ You must provide any weights you wish to use.
         dictionaryToReturn['title_string'] = 'ZunZunSite3 ' + str(self.dimensionality) + 'D Interface ' + self.webFormName
 
         # make a dimensionality-based unbound Django form
-        self.unboundForm = eval('zunzun.forms.CharacterizeDataForm_' + str(self.dimensionality) + 'D()')
+        self.unboundForm = getattr(zunzun.forms, 'CharacterizeDataForm_' + str(self.dimensionality) + 'D')()
 
         # set the form to have either default or session text data
         temp = self.LoadItemFromSessionStore('data', 'textDataEditor_' + str(self.dimensionality) + 'D')
         if temp:
             self.unboundForm.fields['textDataEditor'].initial = temp
         else:
-            self.unboundForm.fields['textDataEditor'].initial = zunzun.forms.formConstants.initialDataEntryText + eval('self.defaultData' + str(self.dimensionality) + 'D')
+            self.unboundForm.fields['textDataEditor'].initial = zunzun.forms.formConstants.initialDataEntryText + getattr(self, 'defaultData' + str(self.dimensionality) + 'D')
         temp = self.LoadItemFromSessionStore('data', 'commaConversion')
         if temp:
             self.unboundForm.fields['commaConversion'].initial = temp
@@ -879,7 +932,7 @@ You must provide any weights you wish to use.
 
     def CreateBoundInterfaceForm(self, request): # OVERRIDDEN in fittingBaseClass
         pid_trace.pid_trace()
-        self.boundForm = eval('zunzun.forms.CharacterizeDataForm_' + str(self.dimensionality) + 'D(request.POST)')
+        self.boundForm = getattr(zunzun.forms, 'CharacterizeDataForm_' + str(self.dimensionality) + 'D')(request.POST)
         self.boundForm.dimensionality = str(self.dimensionality)
         self.boundForm['statisticalDistributionsSortBy'].required = self.statisticalDistribution
         pid_trace.delete_pid_trace_file()

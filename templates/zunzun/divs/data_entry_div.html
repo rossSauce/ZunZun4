@@ -23,6 +23,18 @@ Cut-and-paste text or edit data here
 {% endif %}
 
 <BR>
+<TABLE BORDER="1" CELLPADDING="10">
+<TR>
+    <TD ALIGN=LEFT>
+    <B>Import data from a file</B><BR><BR>
+    <DIV data-zz-import="{{ dimensionality }}" data-zz-weighted="{% if mainForm.weightedFittingPossibleFlag %}1{% else %}0{% endif %}"></DIV>
+    <noscript>Importing files needs JavaScript; you can still paste data below.</noscript>
+    </TD>
+</TR>
+</TABLE>
+<script src="/temp/static_images/zunzun_data_import.js" type="text/javascript"></script>
+
+<BR>
 {{ mainForm.textDataEditor }}
 <BR>
 <BR>

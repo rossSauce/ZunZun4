@@ -1,4 +1,4 @@
-import inspect, time, math, random, multiprocessing, queue, copy, sys, os
+import importlib, inspect, time, math, random, multiprocessing, queue, copy, sys, os
 
 import numpy
 
@@ -21,7 +21,7 @@ def parallelWorkFunction(inParameterList):
     global externalDataCache
 
     try:
-        j = eval(inParameterList[0] + "." + inParameterList[1] + "('" + inParameterList[9] + "', '" + inParameterList[2] + "')")
+        j = getattr(importlib.import_module(inParameterList[0]), inParameterList[1])(inParameterList[9], inParameterList[2])
         j.dataCache = externalDataCache
         j.polyfunctional2DFlags = inParameterList[3]
         j.polyfunctional3DFlags = inParameterList[4]
@@ -121,7 +121,7 @@ class FunctionFinder(StatusMonitoredLongRunningProcessPage.StatusMonitoredLongRu
         self.dataObject.fittingTarget = self.boundForm.cleaned_data['fittingTarget']
         self.dataObject.Max2DPolynomialOrder = len(zunzun.formConstants.polynomialOrder2DChoices) - 1
         self.dataObject.Max3DPolynomialOrder = len(zunzun.formConstants.polynomialOrder3DChoices) - 1
-        self.dataObject.maxCoeffs = eval("int(self.boundForm.cleaned_data['smoothnessControl" + str(self.dataObject.dimensionality) + "D'])")
+        self.dataObject.maxCoeffs = int(self.boundForm.cleaned_data['smoothnessControl' + str(self.dataObject.dimensionality) + 'D'])
         self.dataObject.maxOrEqual = self.boundForm.cleaned_data['smoothnessExactOrMax']
         return ''
 
@@ -553,7 +553,7 @@ class FunctionFinder(StatusMonitoredLongRunningProcessPage.StatusMonitoredLongRu
 
     def CreateBoundInterfaceForm(self, request):
         # make a dimensionality-based bound Django form
-        self.boundForm = eval('zunzun.forms.FunctionFinder_' + str(self.dimensionality) + 'D(request.POST)')
+        self.boundForm = getattr(zunzun.forms, 'FunctionFinder_' + str(self.dimensionality) + 'D')(request.POST)
         self.boundForm.dimensionality = str(self.dimensionality)
             
 

@@ -94,24 +94,21 @@ class StatisticalDistributions(StatusMonitoredLongRunningProcessPage.StatusMonit
             calculateCriteriaForUseInListSorting = 'AICc_BA'
         
         for i in indices:
-            parallelChunkResultsList = []
-            self.pool = multiprocessing.Pool(self.GetParallelProcessCount())
-            
-            for item in self.parallelWorkItemsList[i[0]:i[1]]:
-                parallelChunkResultsList.append(self.pool.apply_async(parallelWorkFunction, (item, self.dataObject.IndependentDataArray[0], calculateCriteriaForUseInListSorting)))
-            
-            for r in parallelChunkResultsList:
-                returnedValue = r.get()
-                if not returnedValue:
+            chunk = self.parallelWorkItemsList[i[0]:i[1]]
+            def onWaiting():
+                self.WorkItems_CheckOneSecondSessionUpdates(countOfWorkItemsRun, totalNumberOfWorkItemsToBeRun)
+            # some distributions take many minutes (or hours) to fit some data sets; those time out and are skipped
+            results = StatusMonitoredLongRunningProcessPage.RunInPoolWithTimeouts(
+                self, parallelWorkFunction,
+                [(item, self.dataObject.IndependentDataArray[0], calculateCriteriaForUseInListSorting) for item in chunk],
+                ['distribution ' + item for item in chunk], onWaiting)
+            for returnedValue in results:
+                if returnedValue is StatusMonitoredLongRunningProcessPage.TIMED_OUT or not returnedValue:
                     continue
                 countOfWorkItemsRun += 1
                 self.completedWorkItemsList.append(returnedValue)
                 self.WorkItems_CheckOneSecondSessionUpdates(countOfWorkItemsRun, totalNumberOfWorkItemsToBeRun)
- 
-            self.pool.close()
-            self.pool.join()
-            self.pool = None
-                
+
         # final save is outside the 'one second updates'
         self.SaveDictionaryOfItemsToSessionStore('status', {'currentStatus':"Fitted %s of %s Statistical Distributions" % (countOfWorkItemsRun, totalNumberOfWorkItemsToBeRun)})
         

@@ -1,10 +1,11 @@
-import os, sys, copy, urllib.request, urllib.parse, urllib.error
+import importlib, os, sys, copy, urllib.request, urllib.parse, urllib.error
 
 import settings
 from django.template.loader import render_to_string
 
 from . import FittingBaseClass
 from . import ReportsAndGraphs
+from . import FunctionFinderPDF
 import pyeq3
 
 from . import pid_trace
@@ -20,6 +21,8 @@ class FunctionFinderResults(FittingBaseClass.FittingBaseClass):
         self.webFormName = 'Function Finder Results'
         self.reniceLevel = 11
         self.maxNumberOfEquationsToDisplay = 40
+        self.pdfEntries = [] # one per equation listed on the page, for CreateReportPDF
+        self.pdfFileName = ''
     
     
     def TransferFormDataToDataObject(self, request): # return any error in a user-viewable string (self.dataObject.ErrorString)
@@ -84,6 +87,10 @@ class FunctionFinderResults(FittingBaseClass.FittingBaseClass):
         itemsToRender['previousSelectorRank'] = self.previousSelectorRank
         itemsToRender['nextSelectorRank'] = self.nextSelectorRank
         itemsToRender['RelativeErrorPlotsFlag'] = self.RelativeErrorPlotsFlag
+        itemsToRender['pdfFileName'] = self.pdfFileName
+        if self.pdfEntries:
+            itemsToRender['pdfFirstRank'] = self.pdfEntries[0]['rank']
+            itemsToRender['pdfLastRank'] = self.pdfEntries[-1]['rank']
 
         tempString = render_to_string('zunzun/function_finder_results.html', itemsToRender)
         fileLocation = os.path.join(settings.TEMP_FILES_DIR, self.dataObject.uniqueString + ".html")
@@ -98,7 +105,9 @@ class FunctionFinderResults(FittingBaseClass.FittingBaseClass):
                                                  {'currentStatus':'Initializing Reports and Graphs',
                                                   'start_time':time.time(),
                                                   'time_of_last_status_check':time.time(),
-                                                  'redirectToResultsFileOrURL':''})
+                                                  'redirectToResultsFileOrURL':'',
+                                                  'processID':0, # set by the fit process when it starts
+                                                  'finished':False}) # the ranking run that led here set this
         pid_trace.delete_pid_trace_file()
 
 
@@ -118,7 +127,7 @@ class FunctionFinderResults(FittingBaseClass.FittingBaseClass):
             reportDataObject = copy.copy(self.dataObject) 
 
             # find the equation instance for the incoming dimensionality, equation family name and equation name - 404 if not found
-            reportDataObject.equation = eval(listItem[1] + "." + listItem[2] + "('SSQABS', '" + listItem[3] + "')")
+            reportDataObject.equation = getattr(importlib.import_module(listItem[1]), listItem[2])('SSQABS', listItem[3])
 
             if externalDataCache.allDataCacheDictionary == {}: # This should only run for the first equation
                 temp = reportDataObject.textDataEditor
@@ -186,6 +195,7 @@ class FunctionFinderResults(FittingBaseClass.FittingBaseClass):
             reportDataObject.equation.CalculateCoefficientAndFitStatistics()
     
             graphs = []
+            firstGraphIndex = len(self.graphReports)
             # Different graphs for 2D and 3D
             reportDataObject.pngOnlyFlag = True
             if reportDataObject.equation.GetDimensionality() == 2:
@@ -221,6 +231,10 @@ class FunctionFinderResults(FittingBaseClass.FittingBaseClass):
                 graphs.append(graph.websiteFileLocation)
                 self.graphReports.append(graph)
     
+            self.pdfEntries.append({'rank': i + self.rank, 'equation': reportDataObject.equation,
+                                    'family': listItem[1].split('.')[-1], 'targetValue': targetValue,
+                                    'graphs': self.graphReports[firstGraphIndex:]})
+
             dataForOneEquation = {}
             splitted = listItem[1].split('.')
             dataForOneEquation['moduleName'] = splitted[-1]
@@ -251,5 +265,18 @@ class FunctionFinderResults(FittingBaseClass.FittingBaseClass):
 
     
     def CreateReportPDF(self):
-        pass # no PDF file 
-()
+        # One PDF for the equations listed on this results page, modelled on tkinterFit's
+        # "Save All Results To PDF" (FunctionFinderPDF.py): a summary, the fitted data, a
+        # ranked table, then each equation's coefficients, statistics and graphs.
+        # Any failure leaves the page without a PDF link rather than failing the page.
+        self.SaveDictionaryOfItemsToSessionStore('status', {'currentStatus':"Creating PDF Output File"})
+        try:
+            self.pdfFileName = self.dataObject.uniqueString + ".pdf"
+            FunctionFinderPDF.CreatePDF(os.path.join(settings.TEMP_FILES_DIR, self.pdfFileName),
+                                        self.dimensionality, self.pdfEntries,
+                                        len(self.functionFinderResultsList), self.GetVerseInfo())
+        except Exception:
+            import logging
+            logging.basicConfig(filename = os.path.join(settings.TEMP_FILES_DIR,  str(os.getpid()) + '.log'),level=logging.DEBUG)
+            logging.exception('Exception creating function finder PDF file')
+            self.pdfFileName = ''

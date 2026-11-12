@@ -1463,6 +1463,23 @@ class StatisticalDistributionHistogram(GraphReport):
 
 
 
+def WriteRotatingGIF(fig, ax, outputPath, elevation, frameSeparation):
+    # One frame every frameSeparation degrees of azimuth, written as a looping GIF with
+    # Pillow. This replaced ImageMagick (mogrify) and gifsicle run through os.popen, which
+    # needed both installed, built shell commands from file names, and ignored failures.
+    import PIL.Image
+    frames = []
+    for azimuth in range(0, 360, frameSeparation):
+        ax.view_init(elev=elevation, azim=azimuth)
+        fig.canvas.draw()
+        frame = PIL.Image.frombuffer('RGBA', fig.canvas.get_width_height(), fig.canvas.buffer_rgba(), 'raw', 'RGBA', 0, 1)
+        frames.append(frame.convert('RGB').convert('P', palette=PIL.Image.Palette.ADAPTIVE, colors=256))
+    # write to a temporary name first so a half-written file is never served
+    temporaryPath = outputPath + '.partial'
+    frames[0].save(temporaryPath, format='GIF', save_all=True, append_images=frames[1:], loop=0, duration=100)
+    os.replace(temporaryPath, outputPath)
+
+
 # enter in Graph Reports at bottom
 class ScatterAnimation(GraphReport):
 
@@ -1496,28 +1513,12 @@ class ScatterAnimation(GraphReport):
         self.dataObject.CalculateGraphBoundaries()
         
         try:
-            [fig, ax, plt] = eval(self.functionString + '(self.dataObject, None)')
-
-            for i in range(0,360, self.animationFrameSeparation): 
-                padstr = ''
-                if i < 100:
-                    padstr = '0'
-                if i  < 10:
-                    padstr = '00'
-
-                ax.view_init(elev=self.dataObject.altimuth3D, azim=i)
-                frameName = self.physicalFileLocation[:-4] + '__' + padstr + str(i) + ".png"
-                fig.savefig(frameName, format = 'png')
-                
-                # convert PNG file to GIF for gifsicle
-                p = os.popen('mogrify -format gif ' + frameName)
-                p.close()
-                
-            plt.close('all')
-            p = os.popen('gifsicle --colors 256 --loopcount  ' + self.physicalFileLocation[:-4] + '__*gif > ' + self.physicalFileLocation)
-            p.close()
-            p = os.popen('rm ' + self.physicalFileLocation[:-4] + '__*')
-            p.close()
+            functionName = self.functionString.split('.')[1]
+            [fig, ax, plt] = getattr(MatplotlibGraphs_3D, functionName)(self.dataObject, None)
+            try:
+                WriteRotatingGIF(fig, ax, self.physicalFileLocation, self.dataObject.altimuth3D, self.animationFrameSeparation)
+            finally:
+                plt.close('all')
         except:
             import logging
             logging.basicConfig(filename = os.path.join(settings.TEMP_FILES_DIR,  str(os.getpid()) + '.log'),level=logging.DEBUG)
@@ -1557,29 +1558,12 @@ class SurfaceAnimation(GraphReport):
             self.dataObject.graphWidth = self.dataObject.animationWidth
             self.dataObject.CalculateGraphBoundaries()
 
-            [fig, ax, plt] = eval(self.functionString + '(self.dataObject, None)')
-
-
-            for i in range(0,360,self.animationFrameSeparation): 
-                padstr = ''
-                if i < 100:
-                    padstr = '0'
-                if i  < 10:
-                    padstr = '00'
-
-                ax.view_init(elev=self.dataObject.altimuth3D, azim=i)
-                frameName = self.physicalFileLocation[:-4] + '__' + padstr + str(i) + ".png"
-                fig.savefig(frameName, format = 'png')
-                
-                # convert PNG file to GIF for gifsicle
-                p = os.popen('mogrify -format gif ' + frameName)
-                p.close()
-                
-            plt.close('all')
-            p = os.popen('gifsicle --colors 256 --loopcount  ' + self.physicalFileLocation[:-4] + '__*gif > ' + self.physicalFileLocation)
-            p.close()
-            p = os.popen('rm ' + self.physicalFileLocation[:-4] + '__*')
-            p.close()
+            functionName = self.functionString.split('.')[1]
+            [fig, ax, plt] = getattr(MatplotlibGraphs_3D, functionName)(self.dataObject, None)
+            try:
+                WriteRotatingGIF(fig, ax, self.physicalFileLocation, self.dataObject.altimuth3D, self.animationFrameSeparation)
+            finally:
+                plt.close('all')
         except:
             import logging
             logging.basicConfig(filename = os.path.join(settings.TEMP_FILES_DIR,  str(os.getpid()) + '.log'),level=logging.DEBUG)

@@ -19,6 +19,10 @@ SupplementaryGroups=rossmoffett
 UMask=0002
 WorkingDirectory=/var/www/html/zunzunsite3
 Environment=PYTHONUNBUFFERED=1
+# Fits already run one process per core; without these each of those processes also starts
+# one BLAS thread per core, so N processes x N threads fight over N cores (and OpenBLAS can
+# fail to allocate memory for all of them on a big machine).
+Environment=OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 
 # Sync workers: the site calls os.fork() for long-running fits and housekeeping, which
 # gunicorn's sync workers allow (uwsgi does not, see README.txt). Each worker loads

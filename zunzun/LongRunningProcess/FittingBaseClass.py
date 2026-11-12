@@ -93,7 +93,7 @@ You must provide any weights you wish to use.
         self.dictionaryToReturn['dimensionality'] = str(self.dimensionality)
         
         # make a dimensionality-based unbound Django form
-        self.unboundForm = eval('zunzun.forms.Equation_' + str(self.dimensionality) + 'D()')
+        self.unboundForm = getattr(zunzun.forms, 'Equation_' + str(self.dimensionality) + 'D')()
             
         # FF - set "rank" variable if coming from the function finders, else set "rank" to None
         if 'RANK' in list(request.GET.keys()):
@@ -169,26 +169,26 @@ You must provide any weights you wish to use.
                 if str(self.dimensionality) == '2':
                     for i in range(len(zunzun.formConstants.polynomialOrder2DChoices)):
                         coefficientBoundsTemplateRequirement.append([self.equation.listOfAdditionalCoefficientDesignators[i],
-                                                                          eval('self.unboundForm["upperCoefficientBound' + str(i) + '"]'),
-                                                                          eval('self.unboundForm["lowerCoefficientBound' + str(i) + '"]')])
-                        fixedCoefficientTemplateRequirement.append([self.equation.listOfAdditionalCoefficientDesignators[i], eval('self.unboundForm["fixedCoefficient' + str(i) + '"]')])
-                        estimatedCoefficientTemplateRequirement.append([self.equation.listOfAdditionalCoefficientDesignators[i], eval('self.unboundForm["estimatedCoefficient' + str(i) + '"]')])
+                                                                          self.unboundForm['upperCoefficientBound' + str(i)],
+                                                                          self.unboundForm['lowerCoefficientBound' + str(i)]])
+                        fixedCoefficientTemplateRequirement.append([self.equation.listOfAdditionalCoefficientDesignators[i], self.unboundForm['fixedCoefficient' + str(i)]])
+                        estimatedCoefficientTemplateRequirement.append([self.equation.listOfAdditionalCoefficientDesignators[i], self.unboundForm['estimatedCoefficient' + str(i)]])
                 else:
                     pass # not used for 3D polynomials
             else:
                 coeffDesignatorList = self.equation.GetCoefficientDesignators()
                 for i in range(len(coeffDesignatorList)):
                     coefficientBoundsTemplateRequirement.append([coeffDesignatorList[i],
-                                                                 eval('self.unboundForm["upperCoefficientBound' + str(i) + '"]'),
-                                                                 eval('self.unboundForm["lowerCoefficientBound' + str(i) + '"]')])
+                                                                 self.unboundForm['upperCoefficientBound' + str(i)],
+                                                                 self.unboundForm['lowerCoefficientBound' + str(i)]])
                     if self.equation.upperCoefficientBounds:
                         if self.equation.upperCoefficientBounds[i] != None:
-                            exec('self.unboundForm.fields["upperCoefficientBound' + str(i) + '"].initial = ' + str(self.equation.upperCoefficientBounds[i]))
+                            self.unboundForm.fields['upperCoefficientBound' + str(i)].initial = self.equation.upperCoefficientBounds[i]
                     if self.equation.lowerCoefficientBounds:
                         if self.equation.lowerCoefficientBounds[i] != None:
-                            exec('self.unboundForm.fields["lowerCoefficientBound' + str(i) + '"].initial = ' + str(self.equation.lowerCoefficientBounds[i]))
-                    fixedCoefficientTemplateRequirement.append([coeffDesignatorList[i], eval('self.unboundForm["fixedCoefficient' + str(i) + '"]')])
-                    estimatedCoefficientTemplateRequirement.append([coeffDesignatorList[i], eval('self.unboundForm["estimatedCoefficient' + str(i) + '"]')])
+                            self.unboundForm.fields['lowerCoefficientBound' + str(i)].initial = self.equation.lowerCoefficientBounds[i]
+                    fixedCoefficientTemplateRequirement.append([coeffDesignatorList[i], self.unboundForm['fixedCoefficient' + str(i)]])
+                    estimatedCoefficientTemplateRequirement.append([coeffDesignatorList[i], self.unboundForm['estimatedCoefficient' + str(i)]])
 
             self.dictionaryToReturn['coefficientBoundsTemplateRequirement'] = coefficientBoundsTemplateRequirement
             self.dictionaryToReturn['fixedCoefficientTemplateRequirement'] = fixedCoefficientTemplateRequirement
@@ -210,7 +210,7 @@ You must provide any weights you wish to use.
     def CreateBoundInterfaceForm(self, request):
         
         # make a dimensionality-based bound Django form
-        self.boundForm = eval('zunzun.forms.Equation_' + str(self.dimensionality) + 'D(request.POST)')
+        self.boundForm = getattr(zunzun.forms, 'Equation_' + str(self.dimensionality) + 'D')(request.POST)
         self.boundForm.dimensionality = str(self.dimensionality)
 
         self.boundForm['fittingTarget'].required = True

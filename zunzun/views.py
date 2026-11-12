@@ -14,8 +14,8 @@ from django.core.mail import EmailMessage
 import settings
 import django.http
 
-import os, sys, time, urllib.request, urllib.parse, urllib.error, signal, copy, pickle
-from . import forms, formConstants
+import logging, os, sys, time, urllib.request, urllib.parse, urllib.error, signal, copy, pickle
+from . import forms, formConstants, udf_safety, process_control
 import numpy, multiprocessing
 
 import zunzun
@@ -67,7 +67,10 @@ def EvaluateAtAPointView(request):
         equation.scipySpline = LRP.LoadItemFromSessionStore('data', 'scipySpline')
     elif equation.userDefinedFunctionFlag:
         equation.userDefinedFunctionText = LRP.LoadItemFromSessionStore('data', 'udfEditor_' + str(equation.GetDimensionality()) + 'D')
-        equation.ParseAndCompileUserFunctionString(equation.userDefinedFunctionText)        
+        try:
+            udf_safety.parse_and_compile_udf(equation, equation.userDefinedFunctionText)
+        except Exception:
+            return HttpResponse('The stored user defined function could not be used, please fit it again.')
     elif equation.userSelectablePolynomialFlag:
         equation.xPolynomialOrder = LRP.LoadItemFromSessionStore('data', 'xPolynomialOrder')
         equation.yPolynomialOrder = LRP.LoadItemFromSessionStore('data', 'yPolynomialOrder')
@@ -86,10 +89,10 @@ def EvaluateAtAPointView(request):
     
     # make bound Django form and call form.is_valid()
     try:
-        evaluationForm = eval('forms.EvaluateAtAPointForm_' + str(LRP.dimensionality) + 'D(request.POST)')
+        evaluationForm = getattr(forms, 'EvaluateAtAPointForm_' + str(LRP.dimensionality) + 'D')(request.POST)
     except:
         time.sleep(1.0)
-        evaluationForm = eval('forms.EvaluateAtAPointForm_' + str(LRP.dimensionality) + 'D(request.POST)')
+        evaluationForm = getattr(forms, 'EvaluateAtAPointForm_' + str(LRP.dimensionality) + 'D')(request.POST)
         
     if not evaluationForm.is_valid():
         return HttpResponse('Invalid data submitted, please try again.')
@@ -118,10 +121,36 @@ def EvaluateAtAPointView(request):
         exceptionString += inEquationName + '\n'
         exceptionString += str(equation.solvedCoefficients) + '\n'
         exceptionString += str(equation.dataCache.allDataCacheDictionary['IndependentData'])
-        pointValueAsString = 'Exception in evaluation, please check the data. Exception text: ' + exceptionString
+        pointValueAsString = 'The equation could not be evaluated at that point, please check the value.'
+        logging.getLogger(__name__).warning('evaluation at a point failed:\n%s', exceptionString)
         if settings.EXCEPTION_EMAIL_ADDRESS:
-            EmailMessage('Site exception in evaluation at a point', exceptionString, to = [settings.EXCEPTION_EMAIL_ADDRESS]).send()
+            try:
+                EmailMessage('Site exception in evaluation at a point', exceptionString, to = [settings.EXCEPTION_EMAIL_ADDRESS]).send()
+            except Exception:
+                logging.getLogger(__name__).exception('could not email the evaluation exception')
     return HttpResponse(pointValueAsString)
+
+
+def ReportUnexpectedError(request, whatWasHappening, sendEmail = True):
+    # Log and email the details; show the visitor only a plain message. Exception text can
+    # include file paths, settings and data that should not be shown to the public.
+    import traceback
+    details = 'Exception while ' + whatWasHappening + ' for ' + request.path + '\n\n' + traceback.format_exc()
+    logging.getLogger(__name__).error(details)
+    if sendEmail and settings.EXCEPTION_EMAIL_ADDRESS:
+        try:
+            EmailMessage('ZunZunSite3 exception', details, to = [settings.EXCEPTION_EMAIL_ADDRESS]).send()
+        except Exception:
+            logging.getLogger(__name__).exception('could not email the exception')
+    return HttpResponse('Sorry, something went wrong while ' + whatWasHappening + '.' + (' The site administrator has been notified.' if sendEmail else ''))
+
+
+def FinalStatusPage(message):
+    # a status page that does not refresh
+    return '''<html><head>
+    <link rel="icon" href="/temp/static_images/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="/temp/static_images/favicon.ico" type="image/x-icon">
+    </head><body>''' + message + '<br><br><a href="/">Home page</a></body></html>'
 
 
 def ConvertSecondsToHMS(seconds):
@@ -147,6 +176,7 @@ def StatusView(request):
             # read and reset
             redirect = pickle.loads(bytes.fromhex(session_status['redirectToResultsFileOrURL']))
             session_status['redirectToResultsFileOrURL'] = pickle.dumps('', pickle.HIGHEST_PROTOCOL).hex()
+            session_status['finished'] = pickle.dumps(True, pickle.HIGHEST_PROTOCOL).hex()
             
             # sometimes database is momentarily locked, so retry on exception to mitigate
             s = session_status
@@ -197,6 +227,23 @@ def StatusView(request):
         timeStamp = pickle.loads(bytes.fromhex(session_status['timestamp']))
     except:
         return HttpResponse("I could not read your session data, my apologies. This is usually caused by a stale browser cookie. Please delete the zunzunsite3 browser cookie and try again.")
+
+    def statusItem(name, default):
+        try:
+            return pickle.loads(bytes.fromhex(session_status[name]))
+        except Exception:
+            return default
+
+    # the results were already shown; without this a reload polled forever
+    if statusItem('finished', False):
+        return HttpResponse(FinalStatusPage('This fit has finished and its results were already displayed. Use your browser\'s back button to return to them, or start a new fit.'))
+
+    # Backstop: the fit process ended (crashed, was killed, or ran out of memory) without
+    # publishing results, so the page would otherwise refresh forever. Allow a few seconds
+    # after the start for the new process to record its pid.
+    processID = statusItem('processID', 0)
+    if processID and time.time() - startTime > 5.0 and not process_control.pid_is_running(processID):
+        return HttpResponse(FinalStatusPage(currentStatus + '<br><br>The fitting process has stopped without producing results. Please try again; if it keeps happening, contact the site administrator.'))
     
     # reload every three seconds
     s = '''<html><head><meta HTTP-EQUIV=REFRESH CONTENT="3; URL='/StatusAndResults/'">
@@ -367,8 +414,8 @@ def LongRunningProcessView(request, inDimensionality, inEquationFamilyName='', i
             try:
                 return render(request, LRP.interfaceString, LRP.CreateUnboundInterfaceForm(request))
                 #return render_to_response(LRP.interfaceString, LRP.CreateUnboundInterfaceForm(request))
-            except:
-                return HttpResponse(repr(sys.exc_info()[0]) + '<br>' + repr(sys.exc_info()[1]))
+            except Exception:
+                return ReportUnexpectedError(request, 'creating the interface page', sendEmail = False) # usually a mistyped or made-up equation URL
 
     if 'cookie_test' not in list(request.session.keys()):
         return HttpResponse("This web site requires a temporary session cookie.  Please enable session cookies (or reload the home page) and try again.")
@@ -376,8 +423,8 @@ def LongRunningProcessView(request, inDimensionality, inEquationFamilyName='', i
     if LRP.userInterfaceRequired:
         try:
             LRP.CreateBoundInterfaceForm(request)
-        except:
-            return HttpResponse(str(sys.exc_info()[0]) + str(sys.exc_info()[1]))
+        except Exception:
+            return ReportUnexpectedError(request, 'reading the submitted form')
         if not LRP.boundForm.is_valid():
             LRP.items_to_render = {}
             LRP.items_to_render['mainForm'] = LRP.boundForm
@@ -395,6 +442,11 @@ def LongRunningProcessView(request, inDimensionality, inEquationFamilyName='', i
         if errorString:
             #return render_to_response('zunzun/generic_error.html', {'error':errorString})
             return render(request, 'zunzun/generic_error.html', {'error':errorString})
+
+    # each fit keeps CPU cores busy for seconds to minutes; stop one client starting many at once
+    ip = process_control.client_ip(request)
+    if process_control.count_active_fits(ip) >= settings.MAX_CONCURRENT_FITS_PER_IP:
+        return render(request, 'zunzun/generic_error.html', {'error': 'You already have %d fits running on this server. Please wait for one to finish (or close its browser tab and wait about five minutes) and try again.' % settings.MAX_CONCURRENT_FITS_PER_IP})
 
     LRP.SetInitialStatusDataIntoSessionVariables(request)
 
@@ -417,38 +469,38 @@ def LongRunningProcessView(request, inDimensionality, inEquationFamilyName='', i
 
     processID_1 = os.fork()
     if processID_1 == 0: # child process, kill when done
-
-        os.nice(LRP.reniceLevel)
-
-        # if top-level exception save data for debugging
-        dataObjectString = ''
-        #try:
-        #    dataObjectString = str(LRP.dataObject)
-        #except:
-        #    dataObjectString = 'could not str(LRP.dataObject)'
-
         try:
+            process_control.reset_inherited_signal_handlers()
+            os.nice(LRP.reniceLevel)
             LRP.PerformAllWork()
-        except:
-            import logging
+        except BaseException:
+            import logging, traceback
             logging.basicConfig(filename = os.path.join(settings.TEMP_FILES_DIR,  str(os.getpid()) + '.log'),level=logging.DEBUG)
-            
-            logging.exception('Site top-level exception\n' + dataObjectString + '\n')
-        
-            extraInfo = '\n\nrequest.META info:\n'
-            for item in request.META:
-                extraInfo += str(item) + ' : ' + str(request.META[item]) + '\n'
-                
-            LRP.SaveDictionaryOfItemsToSessionStore('status', {'currentStatus':"An unknown exception has occurred, and an email with details has been sent to the site administrator. These are sometimes caused by taking the exponent of large numbers."})
+            logging.exception('Site top-level exception')
+
+            # the status page shows this message once it sees this process has ended
+            try:
+                LRP.SaveDictionaryOfItemsToSessionStore('status', {'currentStatus':"An unknown exception has occurred, and an email with details has been sent to the site administrator. These are sometimes caused by taking the exponent of large numbers."})
+            except Exception:
+                logging.exception('Could not save the exception status')
+
+            if settings.EXCEPTION_EMAIL_ADDRESS:
+                try:
+                    details = traceback.format_exc()
+                    details += '\n\nRequest path: ' + request.path + '\nClient: ' + ip + '\n\nrequest.META info:\n'
+                    for item in request.META:
+                        details += str(item) + ' : ' + str(request.META[item]) + '\n'
+                    EmailMessage('ZunZunSite3 exception during a fit', details, to = [settings.EXCEPTION_EMAIL_ADDRESS]).send()
+                except Exception:
+                    logging.exception('Could not email the exception')
         finally:
-            time.sleep(1.0)
-            #if LRP.pool:
-            #    LRP.pool.close()
-            #    LRP.pool.join()
+            process_control.unregister_fit(os.getpid())
             os._exit(0) # kill this child process
-        
-    # using HTTP_HOST allows dev server
-    return HttpResponseRedirect('http://' + request.META['HTTP_HOST'] + '/StatusAndResults/')
+
+    process_control.register_fit(processID_1, ip)
+
+    # host-relative: the browser keeps its scheme (https) and the Host header is not trusted
+    return HttpResponseRedirect('/StatusAndResults/')
 
 
 @cache_control(no_cache=True)
@@ -475,7 +527,7 @@ def FeedbackView(request):
             EmailMessage('ZunZunSite3 Feedback Form', msg, to = [settings.FEEDBACK_EMAIL_ADDRESS]).send()
 
         #return render_to_response('zunzun/feedback_reply.html', {})
-        return render(request, request, 'zunzun/feedback_reply.html', {})
+        return render(request, 'zunzun/feedback_reply.html', {})
     else: # not a POST
         return HttpResponseRedirect('/')
 
@@ -526,6 +578,7 @@ def HomePageView(request):
     processID_1 = os.fork()
     if processID_1 == 0: # child process, kill when done
         try:
+            process_control.reset_inherited_signal_handlers()
             # whenever the home page is loaded, clear expired sessions
             try:
                 ClearExpiredSessionsInBatches()

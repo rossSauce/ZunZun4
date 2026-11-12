@@ -49,7 +49,9 @@ MANAGERS = ADMINS
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': 'session_db/db.sqlite3',
+        # absolute, so a server started from another working directory cannot silently create
+        # and use a second, empty database; ZUNZUN_DB_PATH lets a test server use a copy
+        'NAME': os.environ.get('ZUNZUN_DB_PATH', os.path.join(BASE_DIR, 'session_db', 'db.sqlite3')),
         'OPTIONS':{'timeout':35} # in case database is busy or slow
     }
 }
@@ -133,15 +135,26 @@ INSTALLED_APPS = (
     'zunzun',
 )
 
-# the default JSON serializer yields error in this application
-# http://stackoverflow.com/questions/24229397/django-object-is-not-json-serializable-error-after-upgrading-django-to-1-6-5
-SESSION_SERIALIZER = 'django.contrib.sessions.serializers.PickleSerializer'
+# JSON, not pickle: PickleSerializer was removed in Django 5.0, and unpickling session data
+# runs code if SECRET_KEY ever leaks. Every value the site stores in a session is a str or int
+# (the status/data stores hold their items as hex strings, see SaveDictionaryOfItemsToSessionStore).
+# Sessions saved in the old pickle format read as empty, so a restart that switches format ends
+# any fit in progress; users simply start again.
+SESSION_SERIALIZER = 'django.contrib.sessions.serializers.JSONSerializer'
 
 STATIC_URL = '/temp/'
 
 #TEMP_FILES_DIR = os.path.join(ROOT_PATH, 'temp')
 TEMP_FILES_DIR = '/var/www/html/zunzunsite3/temp'
 MAX_TEMP_DIR_SIZE_IN_MBYTES = 500 # default 500 megabytes maximum
+
+# fits one client address may have running at once (each uses every core it can get);
+# a new fit from the same browser replaces that browser's previous one, which counts until it stops
+MAX_CONCURRENT_FITS_PER_IP = int(os.environ.get('ZUNZUN_MAX_CONCURRENT_FITS_PER_IP', '3'))
+
+# a single parallel work item (one statistical distribution, one report or graph) that takes
+# longer than this is abandoned, so one pathological case cannot hang the whole fit
+PARALLEL_ITEM_TIMEOUT_SECONDS = int(os.environ.get('ZUNZUN_PARALLEL_ITEM_TIMEOUT_SECONDS', '120'))
 
 STATICFILES_DIRS = (
     TEMP_FILES_DIR,

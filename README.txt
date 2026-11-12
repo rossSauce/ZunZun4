@@ -5,13 +5,14 @@ orthogonal distance and relative error regressions. Generates PDF files
 and surface animations. Based on code from zunzun.com, written by
 James R. Phillips. Now maintained by Ross Moffett: findcurves@gmail.com
 
-You will need to install scipy, matplotlib, django, bs4, imagemagick
-gifsicle and reportlab to run this software, alog with psutil.  On
+You will need to install scipy, matplotlib, pillow, django, bs4,
+reportlab and psutil to run this software. (ImageMagick and gifsicle
+are no longer needed: animations are written with Pillow.) On
 Debian and Ubuntu, you can run the following:
 
 apt-get install python3-scipy python3-matplotlib python3-pil
 apt-get install python3-django python3-bs4
-apt-get install python3-reportlab imagemagick gifsicle
+apt-get install python3-reportlab python3-requests
 apt-get install python3-psutil
 
 then install the pyeq3 fitting code with these commands:
@@ -175,3 +176,46 @@ is not available on the  Windows operating system.
 My tests show that while both mod_wsgi and gunicorn work fine
 for Django production servers, the uwsgi process model would not
 allow os.fork() calls to work as required for this software.
+
+
+DATA IMPORT
+
+The data editor on every fitting page can import CSV/text files and
+Excel workbooks (.xlsx .xlsm .xls .ods), and on 2D pages digitize a
+graph image (axis calibration, clicked points, or tracing a curve by
+colour). This runs entirely in the browser: files are never uploaded,
+the numbers are put into the text editor and validated by the server as
+usual. The code is temp/static_images/zunzun_data_import.js (adapted
+from tkinterFit). Excel files are read with SheetJS, a pinned copy in
+temp/static_images/xlsx-0.20.3.full.min.js (Apache 2.0 licence beside
+it), loaded only when a workbook is opened. To update it, download the
+current release from https://cdn.sheetjs.com/ (not npm, whose "xlsx"
+package is outdated and has known vulnerabilities), replace the file and
+change SHEETJS_URL in zunzun_data_import.js. Browser tests:
+deploy/test_data_import.html (instructions at its top).
+
+
+TESTING
+
+deploy/smoke_test.py submits real fits (2D, 3D, ODR, spline, user
+defined functions, characterizer, statistical distributions, function
+finder, animation) and checks the results pages, PDFs and GIFs. It also
+checks that unsafe user defined functions are rejected. Run it against
+a throwaway server so production is not loaded or touched:
+
+deploy/test_server.sh /tmp/zunzun-test
+python3 deploy/smoke_test.py                 # all scenarios, several minutes
+python3 deploy/smoke_test.py fit2d udf2d     # or just some
+kill $(cat /tmp/zunzun-test/gunicorn.pid)
+
+Run it after any code change or package upgrade (Debian, pyeq3) and
+before restarting the production service.
+
+
+LIMITS
+
+settings.py has MAX_CONCURRENT_FITS_PER_IP (default 3, or environment
+variable ZUNZUN_MAX_CONCURRENT_FITS_PER_IP) and
+PARALLEL_ITEM_TIMEOUT_SECONDS (default 120): one statistical
+distribution, report or graph that takes longer than that is skipped
+so a single pathological case cannot hang a whole fit.

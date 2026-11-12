@@ -2,6 +2,7 @@
 session_db/db.sqlite3
 session_db/db.sqlite3-*
 session_db/clear_sessions.lock
+session_db/active_fits/
 
 # generated graphs, result pages, PDFs, logs and trace files; static_images is tracked
 temp/*

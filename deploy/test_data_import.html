@@ -1,0 +1,96 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<!-- Browser tests for temp/static_images/zunzun_data_import.js. Open in a browser, or:
+     firefox --headless --window-size 900,450 --screenshot /tmp/shot.png file:///var/www/html/zunzunsite3/deploy/test_data_import.html
+     and look for ALL PASSED at the end of the list. -->
+<script src="file:///var/www/html/zunzunsite3/temp/static_images/xlsx-0.20.3.full.min.js"></script>
+<script src="file:///var/www/html/zunzunsite3/temp/static_images/zunzun_data_import.js"></script>
+<style>body{font:16px monospace} .f{color:#b00}</style></head><body><pre id="out"></pre>
+<form id="f"><input name="weightedFittingChoice" type="radio" value="OFF" checked><input name="weightedFittingChoice" type="radio" value="ON">
+<input name="dataNameX"><input name="dataNameY"><textarea name="textDataEditor"></textarea><div id="c" data-x="1"></div></form>
+
+<script>
+var out = document.getElementById('out'), Z = window.ZunZunDataImport, fails = 0;
+function check(name, ok, detail) { if (!ok) fails++; out.textContent += (ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + detail) + '\n'; }
+function buf(s) { return new TextEncoder().encode(s).buffer; }
+try {
+  // CSV with header, BOM, quoted field, blank and note lines
+  var t = Z.readDelimitedText(buf('﻿Time (s),"Height, m",Note\n1,2.5,a\n2,4.4,b\n\nnot data,x,y\n3,6.6,"c"\n'));
+  check('csv rows', t.rows.length === 7, JSON.stringify(t.rows));
+  check('csv header detected', Z.looksLikeHeader(t.rows, false), '');
+  check('csv numeric columns', JSON.stringify(Z.numericColumns(t.rows, true, false)) === '[0,1]', JSON.stringify(Z.numericColumns(t.rows, true, false)));
+  var e = Z.extractPoints(t.rows, [0, 1], true, false);
+  check('csv points', JSON.stringify(e.points) === '[[1,2.5],[2,4.4],[3,6.6]]' && e.skipped === 1, JSON.stringify(e));
+  check('quoted header', t.rows[0][1] === 'Height, m', t.rows[0][1]);
+  // European: semicolons and decimal commas
+  var eu = Z.readDelimitedText(buf('x;y\n1,5;2,25\n2,5;6,25\n'));
+  var ee = Z.extractPoints(eu.rows, [0, 1], true, eu.commaIsDecimal);
+  check('semicolon decimal comma', JSON.stringify(ee.points) === '[[1.5,2.25],[2.5,6.25]]', JSON.stringify(ee.points));
+  // whitespace separated, no header, exponent and unicode minus
+  var ws = Z.readDelimitedText(buf('1  2e3\n−2\t-4.5E-2\n'));
+  var we = Z.extractPoints(ws.rows, [0, 1], false, false);
+  check('whitespace + exponents', JSON.stringify(we.points) === '[[1,2000],[-2,-0.045]]', JSON.stringify(we.points));
+  check('rejects junk numbers', Z.toFloat('12abc') === null && Z.toFloat('0x10') === null && Z.toFloat('Infinity') === null, '');
+  // data text the server accepts: description, header, rows
+  var dt = Z.dataText([[1, 2.5], [2, 4.4]], ['X', 'Y'], 'Imported');
+  check('data text', dt === 'Imported\n\nX   Y\n1 2.5\n2 4.4\n', JSON.stringify(dt));
+  // workbook round trip through SheetJS (formulas give their cached value)
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['note'], ['x', 'y']]), 'Notes');
+  var ws2 = XLSX.utils.aoa_to_sheet([['x', 'y'], [1, 3], [2, 5], [3, 7]]);
+  ws2['C2'] = { t: 'n', f: 'A2*2', v: 2 }; ws2['!ref'] = 'A1:C4';
+  XLSX.utils.book_append_sheet(wb, ws2, 'Data');
+  var bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  Z.readWorkbook(bytes).then(function (book) {
+    check('xlsx sheets', JSON.stringify(book.sheetNames) === '["Notes","Data"]', JSON.stringify(book.sheetNames));
+    var rows = book.tables.Data;
+    check('xlsx header', Z.looksLikeHeader(rows, false), JSON.stringify(rows));
+    var p = Z.extractPoints(rows, [0, 1], true, false);
+    check('xlsx points', JSON.stringify(p.points) === '[[1,3],[2,5],[3,7]]', JSON.stringify(p.points));
+    check('xlsx formula value not formula text', rows[1][2] === 2, JSON.stringify(rows[1]));
+    var xlsBytes = XLSX.write(wb, { type: 'array', bookType: 'biff8' });
+    return Z.readWorkbook(xlsBytes);
+  }).then(function (book) {
+    var p = Z.extractPoints(book.tables.Data, [0, 1], true, false);
+    check('xls (old Excel) points', JSON.stringify(p.points) === '[[1,3],[2,5],[3,7]]', JSON.stringify(p.points));
+  }).catch(function (err) { check('workbook', false, String(err)); }).then(digitize);
+} catch (err) { check('exception', false, err + ' ' + err.stack); }
+
+function digitize() {
+  try {
+    // a 400x300 "graph": axes in black, a red line y = 2x + 1 for x 0..10, y 0..25
+    var g = document.createElement('canvas'); g.width = 400; g.height = 300;
+    var c = g.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, 400, 300);
+    function px(x) { return 50 + x * 30; } function py(y) { return 260 - y * 10; }
+    c.strokeStyle = '#000'; c.beginPath(); c.moveTo(50, 260); c.lineTo(370, 260); c.moveTo(50, 260); c.lineTo(50, 0); c.stroke();
+    c.strokeStyle = 'rgb(220,0,0)'; c.lineWidth = 2; c.beginPath(); c.moveTo(px(0), py(1)); c.lineTo(px(10), py(21)); c.stroke();
+    var form = document.getElementById('f'), container = document.getElementById('c');
+    var d = new Z.DataImporter(container, form, 2, false);
+    d.imageInput = { files: [{ name: 'test.png' }] };
+    d.loadImageIntoCanvas(g, 400, 300);
+    d.calibrationInputs.X1.value = '0'; d.calibrationInputs.X2.value = '10';
+    d.calibrationInputs.Y1.value = '0'; d.calibrationInputs.Y2.value = '20';
+    d.calibration = { X1: [px(0), 260], X2: [px(10), 260], Y1: [50, py(0)], Y2: [50, py(20)] };
+    d.curveColor = d.pickColor([px(5), py(11) + 1]);
+    check('picked red', d.curveColor[0] > 150 && d.curveColor[1] < 100, JSON.stringify(d.curveColor));
+    d.trace();
+    check('traced points', d.points.length > 40, String(d.points.length));
+    d.useImagePoints();
+    var lines = form.elements.textDataEditor.value.split('\n').filter(function (l) { return /^[-\d]/.test(l); });
+    var worst = 0;
+    lines.forEach(function (l) { var v = l.split(' ').map(Number); worst = Math.max(worst, Math.abs(v[1] - (2 * v[0] + 1))); });
+    check('digitized y = 2x + 1 within 0.25', lines.length > 40 && worst < 0.25, 'n=' + lines.length + ' worst=' + worst);
+    check('digitized header line', form.elements.textDataEditor.value.indexOf('Digitized from test.png') === 0, form.elements.textDataEditor.value.slice(0, 40));
+    // log y axis
+    d.logChecks.Y.checked = true; d.calibrationInputs.Y1.value = '1'; d.calibrationInputs.Y2.value = '100';
+    d.points = [[px(0), py(10)]]; d.points.push([px(1), py(10)]);
+    d.useImagePoints();
+    var logLine = form.elements.textDataEditor.value.split('\n').filter(function (l) { return /^[-\d]/.test(l); })[0].split(' ').map(Number);
+    check('log axis midpoint = 10', Math.abs(logLine[1] - 10) < 1e-9, JSON.stringify(logLine));
+    // file text never becomes markup
+    var hostile = Z.readDelimitedText(buf('<img src=x onerror=alert(1)>,y\n1,2\n'));
+    check('header text kept as text', hostile.rows[0][0] === '<img src=x onerror=alert(1)>', '');
+  } catch (err) { check('digitize exception', false, err + ' ' + err.stack); }
+  out.textContent += (fails ? fails + ' FAILED' : 'ALL PASSED') + '\n';
+  document.title = fails ? 'FAILED' : 'PASSED';
+}
+</script></body></html>

@@ -9,6 +9,7 @@ from . import FittingBaseClass
 from . import ReportsAndGraphs
 
 import zunzun.forms
+import zunzun.udf_safety
 import pyeq3
 
 
@@ -37,7 +38,7 @@ class FitUserDefinedFunction(FittingBaseClass.FittingBaseClass):
 
 
     def SpecificEquationUnboundInterfaceCode(self, request):
-        self.unboundForm.fields['udfEditor'].initial = eval('zunzun.formConstants.initialUserDefinedFunctionText' + str(self.dimensionality) + 'D')
+        self.unboundForm.fields['udfEditor'].initial = getattr(zunzun.formConstants, 'initialUserDefinedFunctionText' + str(self.dimensionality) + 'D')
         if self.dimensionality == 2:
             self.dictionaryToReturn['udfFunctionsDict'] = pyeq3.Models_2D.UserDefinedFunction.UserDefinedFunction.functionDictionary
         else:
@@ -46,7 +47,11 @@ class FitUserDefinedFunction(FittingBaseClass.FittingBaseClass):
 
     def SpecificEquationBoundInterfaceCode(self, request):
         self.boundForm.equation.userDefinedFunctionText = request.POST['udfEditor']
-        self.boundForm.equation.ParseAndCompileUserFunctionString(self.boundForm.equation.userDefinedFunctionText)
+        # form validation (zunzun/forms.py) parses this again and reports any problem to the user
+        try:
+            zunzun.udf_safety.parse_and_compile_udf(self.boundForm.equation, self.boundForm.equation.userDefinedFunctionText)
+        except Exception:
+            pass
 
         
     def SpecificCodeForGeneratingListOfOutputReports(self):

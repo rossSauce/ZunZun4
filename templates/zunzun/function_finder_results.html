@@ -31,6 +31,10 @@
 
 <br><br>
 
+{% if pdfFileName %}
+You can download the results for ranks {{ pdfFirstRank }} to {{ pdfLastRank }} as <a href='/temp/{{ pdfFileName }}'>a single PDF file</a>.<br><br>
+{% endif %}
+
 <table border='1'>
 <tr>
     <td align='center'>Model Plots</td>
