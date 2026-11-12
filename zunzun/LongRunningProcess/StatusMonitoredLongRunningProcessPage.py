@@ -283,10 +283,10 @@ You must provide any weights you wish to use.
             myTableStyle = [('ALIGN', (1,1), (-1,-1), 'CENTER'),
                             ('VALIGN', (1,1), (-1,-1), 'MIDDLE')]
 
-            largeLogoImage = reportlab.platypus.Image(os.path.join(settings.TEMP_FILES_DIR, 'static_images/logo.png'), 25 * scale * 3, 25 * scale * 3)
+            largeLogoImage = reportlab.platypus.Image(os.path.join(settings.TEMP_FILES_DIR, 'static_images/findcurves_256.png'), 25 * scale * 3, 25 * scale * 3)
 
             tableRow = [largeLogoImage,
-                        'ZunZunSite3',
+                        'FindCurves',
                         largeLogoImage]
 
             table = reportlab.platypus.Table([tableRow], style=myTableStyle)
@@ -847,8 +847,8 @@ You must provide any weights you wish to use.
 
         itemsToRender['dimensionality'] = str(self.dimensionality)
 
-        itemsToRender['header_text'] = 'ZunZunSite3<br>' + self.webFormName
-        itemsToRender['title_string'] = 'ZunZunSite3 ' + self.webFormName.replace('<br>', ' ')
+        itemsToRender['header_text'] = 'FindCurves<br>' + self.webFormName
+        itemsToRender['title_string'] = 'FindCurves ' + self.webFormName.replace('<br>', ' ')
 
         itemsToRender['textReports'] = self.textReports
 
@@ -906,8 +906,8 @@ You must provide any weights you wish to use.
         dictionaryToReturn = {}
         dictionaryToReturn['dimensionality'] = str(self.dimensionality)
 
-        dictionaryToReturn['header_text'] = 'ZunZunSite3 ' + str(self.dimensionality) + 'D Interface<br>' + self.webFormName
-        dictionaryToReturn['title_string'] = 'ZunZunSite3 ' + str(self.dimensionality) + 'D Interface ' + self.webFormName
+        dictionaryToReturn['header_text'] = 'FindCurves ' + str(self.dimensionality) + 'D Interface<br>' + self.webFormName
+        dictionaryToReturn['title_string'] = 'FindCurves ' + str(self.dimensionality) + 'D Interface ' + self.webFormName
 
         # make a dimensionality-based unbound Django form
         self.unboundForm = getattr(zunzun.forms, 'CharacterizeDataForm_' + str(self.dimensionality) + 'D')()

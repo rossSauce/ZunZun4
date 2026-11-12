@@ -146,7 +146,7 @@ def CreatePDF(fileName, dimensionality, entries, totalEquationsFound, verseInfo)
     lastRank = entries[-1]['rank']
 
     elements = []
-    elements.append(reportlab.platypus.Paragraph('ZunZunSite3 Function Finder Results', styles['Title']))
+    elements.append(reportlab.platypus.Paragraph('FindCurves Function Finder Results', styles['Title']))
     elements.append(reportlab.platypus.Spacer(1, 12))
     summary = [['Dimensionality', '%dD' % dimensionality],
                ['Fitting target', targetName],
@@ -213,6 +213,6 @@ def CreatePDF(fileName, dimensionality, entries, totalEquationsFound, verseInfo)
     doc = reportlab.platypus.SimpleDocTemplate(temporaryName, pagesize=reportlab.lib.pagesizes.letter,
                                                leftMargin=0.6*inch, rightMargin=0.6*inch,
                                                topMargin=0.6*inch, bottomMargin=0.9*inch,
-                                               title='ZunZunSite3 Function Finder Results')
+                                               title='FindCurves Function Finder Results')
     doc.build(elements, canvasmaker=NumberedCanvas)
     os.replace(temporaryName, fileName)
